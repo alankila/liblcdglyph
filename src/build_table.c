@@ -66,6 +66,7 @@ init()
 
 void
 lcdg_build_table(uint8_t *table,
+		 float *error,
 		 uint8_t startbg_,
 		 uint8_t endbg_)
 {
@@ -106,8 +107,14 @@ lcdg_build_table(uint8_t *table,
 	    }
 
 	    startac = bestac;
-	    *table = bestac;
-	    table ++;
+	    if (table != 0) {
+		*table = bestac;
+		table ++;
+	    }
+	    if (error != 0) {
+		*error = sqrtf(besterror / 256.0f / 256.0f);
+		error ++;
+	    }
 	}
     }
 }

@@ -5,7 +5,7 @@
 
 uint8_t *lcdg_get_default_table();
 
-void lcdg_build_table(uint8_t *table, uint8_t bg_start, uint8_t bg_end);
+void lcdg_build_table(uint8_t *table, float *error, uint8_t bg_start, uint8_t bg_end);
 
 typedef uint8_t lcdg_reader_func_t(void *data, uint32_t x, uint32_t y);
 
