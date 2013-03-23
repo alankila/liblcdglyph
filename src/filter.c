@@ -23,17 +23,17 @@ filter(uint8_t a1,
        uint8_t a2,
        uint8_t a3)
 {
-    return (0x55 + a1 + 0x56 * a2 + 0x55 * a3 + (1 << 7)) >> 8;
+    return (0x55 * a1 + 0x56 * a2 + 0x55 * a3 + (1 << 7)) >> 8;
 }
 
 void
 lcdg_filter_horizontal(lcdg_reader_t *reader,
 	    	       lcdg_writer_t *writer,
-	               uint8_t *alpha_correct_table,
+	               uint8_t *alpha_correct_table[3],
 	   	       uint8_t foreground[3],
 	    	       uint8_t dark_glyph_enhancement)
 {
-    for (int32_t y = 0; y < reader->height; y ++) {
+    for (int32_t y = 0; y < reader->height && y < writer->height; y ++) {
 	uint8_t a1 = 0;
 	uint8_t a2 = 0;
 	uint8_t a3 = 0;
@@ -42,24 +42,25 @@ lcdg_filter_horizontal(lcdg_reader_t *reader,
 	uint8_t fgidx = 2;
 
 	/* 1 pixel extra space on both sides to spill LCD filtering */
-	for (int32_t x = -1; x < reader->width + 1; x ++) {
+	for (int32_t x = -1; x < reader->width + 1 && x < writer->width; x ++) {
 	    /* Read pixel from input bitmap, or 0 if access falls outside bound.
 	     * a2 represents current subpixel, a1 previous, and a3 next. */
 	    a1 = a2;
 	    a2 = a3;
-	    a3 = x + 1 < reader->width ? reader->read(reader->data, x + 1, y) : 0;
+	    a3 = x + 1 < reader->width ? reader->read(reader, x + 1, y) : 0;
 
 	    /* Determine foreground color */
 	    uint8_t fg = foreground[fgidx];
-	    if (++ fgidx == 3) {
-		fgidx = 0;
-	    }
 
 	    a3 = enhance(dark_glyph_enhancement, a3, fg);
 	    uint8_t a = filter(a1, a2, a3);
-	    uint8_t ac = alpha_correct_table[fg << 8 | a];
+	    uint8_t ac = alpha_correct_table[fgidx][fg << 8 | a];
 
-	    writer->write(writer->data, x + 1, y, ac);
+	    writer->write(writer, x, y, ac);
+	    
+	    if (++ fgidx == 3) {
+		fgidx = 0;
+	    }
 	}
     }
 }
