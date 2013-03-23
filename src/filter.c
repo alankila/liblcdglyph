@@ -42,7 +42,7 @@ lcdg_filter_horizontal(lcdg_reader_t *reader,
 	uint8_t fgidx = 2;
 
 	/* 1 pixel extra space on both sides to spill LCD filtering */
-	for (int32_t x = -1; x < reader->width + 1 && x < writer->width; x ++) {
+	for (int32_t x = -1; x < reader->width + 1 && x + 1 < writer->width; x ++) {
 	    /* Read pixel from input bitmap, or 0 if access falls outside bound.
 	     * a2 represents current subpixel, a1 previous, and a3 next. */
 	    a1 = a2;
@@ -56,7 +56,7 @@ lcdg_filter_horizontal(lcdg_reader_t *reader,
 	    uint8_t a = filter(a1, a2, a3);
 	    uint8_t ac = alpha_correct_table[fgidx][fg << 8 | a];
 
-	    writer->write(writer, x, y, ac);
+	    writer->write(writer, x + 1, y, ac);
 	    
 	    if (++ fgidx == 3) {
 		fgidx = 0;

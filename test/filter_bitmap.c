@@ -55,7 +55,7 @@ main(int argc, char **argv)
     lcdg_filter_horizontal(&reader, &writer, tables, color, 128);
 
     for (int i = 0; i < writer.height; i ++) {
-	for (int j = 0; j < reader.width / 3; j ++) {
+	for (int j = 0; j < writer.width / 3; j ++) {
 	    uint32_t *data = (uint32_t *) writer.data;
 	    uint32_t value = data[i * writer.stride + j];
 	    fprintf(stdout, "%3d %3d %3d ", (value & 0xff0000) >> 16, (value & 0xff00) >> 8, value & 0xff);
