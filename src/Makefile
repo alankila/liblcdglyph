@@ -1,5 +1,6 @@
-CFLAGS = -O2 -std=c99 -Wall -fPIC
-LDFLAGS = -lm
+CFLAGS := -O2 -std=c99 -Wall -fPIC
+LDFLAGS := -lm
+OBJS := get_default_table.o build_table.o filter.o
 
-liblcdfilter.so: actable.o build_actable.o glyphfilter.o
-	gcc -o $@ -shared $< $(LDFLAGS)
+liblcdglyph.so: $(OBJS)
+	gcc -o $@ -shared $(OBJS) $(LDFLAGS)

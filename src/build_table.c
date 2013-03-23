@@ -21,6 +21,8 @@
 #include <math.h>
 #include <stdint.h>
 
+#include "lcdglyph.h"
+
 static uint16_t s2l[65536];
 static uint16_t l2s[65536];
 
