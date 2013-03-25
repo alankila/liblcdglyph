@@ -96,8 +96,8 @@ lcdg_build_table(uint8_t *table,
 	    int32_t bestac = 0;
 
 	    /* Apply Skia-like contrast hack, which manipulates the target alpha based on foregroud */
-	    int32_t contrast = (65535 - fg) * 0x66 >> 16;
-	    int32_t ca = a + (a * (255 - a) * contrast >> 16);
+	    //int32_t contrast = (65535 - fg) * 0x40 >> 16;
+	    int32_t ca = a;// + (a * (255 - a) * contrast >> 16);
 
 	    /* find the best ac for each (alpha, fg) pair.
 	     * f(alpha) = ac appears to be monotonic,
