@@ -3,20 +3,14 @@
  * See COPYING for the applicable Open Source license.
  *
  * Build alpha correction table where index is fg << 8 | alpha and value is
- * the corrected alpha.
+ * the corrected alpha. The process is an optimization problem where every
+ * possible choice is evaluated and the optimal value is chosen.
  *
  * Theory of alpha correction is based on the notion that correct sRGB
- * blending can be achieved with linearly blending sRGB operator is the alpha
- * channel may be adjusted freely. Furthermore, it is generally true that text
- * is designed to be read, so we can make the assumption that background is
- * far away from foreground. In particular, we can treat large fg-bg
- * differences as more likely.
- *
- * The problem can be solved generically as an optimization problem where
- * the potential background choices are tried against the result of a trial
- * alpha correction value, and the value for alpha correction is chosen that
- * yields the lowest error based on some reasonable error metric.
- *
+ * blending can be achieved with linearly blending sRGB operator if the alpha
+ * channel is adjusted to produce it. Furthermore, it is generally true that
+ * contrast is large, so large differences in components are more likely. We
+ * capture this through using absolute differences in our error metric.
  */
 #include <math.h>
 #include <stdint.h>
@@ -64,6 +58,26 @@ init()
     }
 }
 
+/* This calculates the alpha using the best alpha for the 1.0 - fg as theory for background */
+/*
+static int32_t
+estimate_alpha(int32_t fg, int32_t alpha) {
+    int32_t fg_lin = s2l[fg];
+    int32_t bg_lin = 65535 - fg_lin;
+    if (bg_lin < 0) {
+	bg_lin = 0;
+    }
+    int32_t bg = l2s[bg_lin];
+    if (fg == bg) {
+	return alpha;
+    }
+
+    int32_t blended_lin = (alpha * fg_lin + (255 - alpha) * bg_lin + 128) / 255;
+    int32_t blended = l2s[blended_lin];
+    return 255 * (blended - bg) / (fg - bg);
+}
+*/
+
 void
 lcdg_build_table(uint8_t *table,
 		 float *error,
@@ -84,13 +98,14 @@ lcdg_build_table(uint8_t *table,
 	    /* find the best ac for each (alpha, fg) pair.
 	     * f(alpha) = ac appears to be monotonic,
 	     * so we start search from the previous value. */
+//	    int32_t startac = estimate_alpha(fg, a);
 	    for (int32_t ac = startac; ac < 256; ac ++) {
 		uint32_t error = 0;
 		for (int32_t bg = startbg; bg < endbg; bg += 0x101) {
 		    int32_t linear_blended = (ac * fg + (255 - ac) * bg + 128) / 255;
 		    int32_t srgb_blended = l2s[(a * s2l[fg] + (255 - a) * s2l[bg] + 128) / 255];
 
-		    /* 12 bits, should suffice to represent the linearly coded value exactly enough */
+		    /* 12 bits */
 		    int32_t difference = (linear_blended - srgb_blended) >> 4;
 		    /* 24 bits, 32 sums */
 		    error += difference * difference;
