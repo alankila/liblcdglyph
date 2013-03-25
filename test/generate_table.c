@@ -12,7 +12,8 @@ main(int argc, char **argv)
     for (int i = 0; i < 65536; i ++) {
 	int fg = i >> 8;
 	int alpha = i & 0xff;
-        fprintf(stdout, "%d %d %d %f\n", fg, alpha, table[i], error[i]);
+        //fprintf(stdout, "%d %d %d %f\n", fg, alpha, table[i], error[i]);
+        fprintf(stdout, "%d,", table[i]);
 	if (alpha == 255) {
 	    fprintf(stdout, "\n");
 	}

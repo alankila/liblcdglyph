@@ -95,6 +95,10 @@ lcdg_build_table(uint8_t *table,
 	    uint32_t besterror = 0xffffffff;
 	    int32_t bestac = 0;
 
+	    /* Apply Skia-like contrast hack, which manipulates the target alpha based on foregroud */
+	    int32_t contrast = (65535 - fg) * 0x66 >> 16;
+	    int32_t ca = a + (a * (255 - a) * contrast >> 16);
+
 	    /* find the best ac for each (alpha, fg) pair.
 	     * f(alpha) = ac appears to be monotonic,
 	     * so we start search from the previous value. */
@@ -103,7 +107,7 @@ lcdg_build_table(uint8_t *table,
 		uint32_t error = 0;
 		for (int32_t bg = startbg; bg < endbg; bg += 0x101) {
 		    int32_t linear_blended = (ac * fg + (255 - ac) * bg + 128) / 255;
-		    int32_t srgb_blended = l2s[(a * s2l[fg] + (255 - a) * s2l[bg] + 128) / 255];
+		    int32_t srgb_blended = l2s[(ca * s2l[fg] + (255 - ca) * s2l[bg] + 128) / 255];
 
 		    /* 12 bits */
 		    int32_t difference = (linear_blended - srgb_blended) >> 4;

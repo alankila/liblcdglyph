@@ -3,7 +3,7 @@ LDFLAGS = -lm -L../src -llcdglyph
 
 .phony: all
 
-all: generate_table filter_bitmap
+all: generate_table filter_bitmap full_error_map
 
 generate_table: generate_table.o
 	gcc -o $@ $< $(LDFLAGS)
@@ -11,3 +11,5 @@ generate_table: generate_table.o
 filter_bitmap: filter_bitmap.o
 	gcc -o $@ $< $(LDFLAGS)
 
+full_error_map: full_error_map.o
+	gcc -o $@ $< $(LDFLAGS)
