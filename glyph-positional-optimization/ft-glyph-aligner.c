@@ -73,14 +73,32 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  int bestscore = 0;
-  for (int dy = -32; dy < 32; dy += 1) {
-    for (int dx = -32; dx < 32; dx += 1) {
+  /* Perform a 2D scan of the surface looking for optimal positioning in
+   * 5 * 9 = 45 iterations */
+  int step = 16;
+  int dx = 0;
+  int dy = 0;
+  while (step != 0) {
+    int bestscore = 0;
+    int besti = 0;
+    for (int i = 0; i < 9; i ++) {
       FT_Glyph copy;
 
       error = FT_Get_Glyph(face->glyph, &copy);
 
-      FT_Vector position = { dx, dy };
+      /* Generate adjustment coordinates:
+       *
+       * 0 1 2
+       * 3 4 5
+       * 6 7 8
+       *
+       * In theory we could cache 4, because last iteration's 4 score
+       * could be kept in bestscore.
+       */
+      int adjx = ((i % 3) - 1) * step;
+      int adjy = ((i / 3) - 1) * step;
+
+      FT_Vector position = { dx + adjx, dy + adjy };
       error = FT_Glyph_To_Bitmap(&copy, FT_RENDER_MODE_NORMAL, &position, 1);
       if (error) {
         fprintf(stderr, "FT render glyph: error %d\n", error);
@@ -89,13 +107,17 @@ int main(int argc, char **argv) {
 
       int score = estimate_contrast(((FT_BitmapGlyph) copy)->bitmap);
       if (score > bestscore) {
-  	fprintf(stdout, "translated: (%d %d)/64 px, score: %d\n", dx, dy, score);
+  	fprintf(stdout, "translated: (%d %d)/64 px, score: %d\n", (int) position.x, (int) position.y, score);
   	print_glyph(((FT_BitmapGlyph) copy)->bitmap);
         bestscore = score;
+        besti = i;
       }
 
       FT_Done_Glyph(copy);
     }
-  }
 
+    dx += ((besti % 3) - 1) * step;
+    dy += ((besti / 3) - 1) * step;
+    step >>= 1;
+  }
 }
