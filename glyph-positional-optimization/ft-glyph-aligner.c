@@ -3,7 +3,7 @@
 #include <freetype/ftglyph.h>
 #include <stdio.h>
 
-void print_glyph(FT_Bitmap bitmap) {
+void draw_glyph_bitmap(FT_Bitmap bitmap) {
     for (int y = 0; y < bitmap.rows; y ++) {
         for (int x = 0; x < bitmap.width; x ++) {
             unsigned char c = bitmap.buffer[y * bitmap.pitch + x];
@@ -13,20 +13,54 @@ void print_glyph(FT_Bitmap bitmap) {
     }
 }
 
-int estimate_contrast(FT_Bitmap bitmap) {
+/* The higher score the better. Can be negative. Absolute value has no meaning. */
+int score_glyph_bitmap(FT_Bitmap bitmap) {
     int score = 0;
     for (int y = 0; y < bitmap.rows; y ++) {
         for (int x = 0; x < bitmap.width; x ++) {
             unsigned char c = bitmap.buffer[y * bitmap.pitch + x];
-            unsigned char xm = x != 0 ? bitmap.buffer[y * bitmap.pitch + x - 1] : 0;
-            unsigned char xp = x != bitmap.width - 1 ? bitmap.buffer[y * bitmap.pitch + x + 1] : 0;
-            unsigned char ym = y != 0 ? bitmap.buffer[(y - 1) * bitmap.pitch + x] : 0;
-            unsigned char yp = y != bitmap.rows - 1 ? bitmap.buffer[(y + 1) * bitmap.pitch + x] : 0;
-	    int point = xm + xp + ym + yp - 4 * c;
-            score += point * point;
+	    score -= c * (255 - c);
         }
     }
     return score;
+}
+
+int score_glyph(FT_GlyphSlot glyph, int dx, int dy) {
+    FT_Glyph copy;
+    FT_Error error;
+
+    error = FT_Get_Glyph(glyph, &copy);
+    FT_Vector position = { dx, dy };
+    error = FT_Glyph_To_Bitmap(&copy, FT_RENDER_MODE_NORMAL, &position, 1);
+    if (error) {
+        fprintf(stderr, "FT glyph to bitmap: error %d\n", error);
+        return -0x7ffffff;
+    }
+    FT_BitmapGlyph bitmapcopy = (FT_BitmapGlyph) copy;
+
+    int score = score_glyph_bitmap(bitmapcopy->bitmap);
+    FT_Done_Glyph(copy);
+    return score;
+}
+
+void draw_glyph(FT_GlyphSlot glyph, int dx, int dy) {
+    FT_Glyph copy;
+    FT_Error error;
+
+    error = FT_Get_Glyph(glyph, &copy);
+    FT_Vector position = { dx, dy };
+    error = FT_Glyph_To_Bitmap(&copy, FT_RENDER_MODE_NORMAL, &position, 1);
+    if (error) {
+        fprintf(stderr, "FT glyph to bitmap: error %d\n", error);
+        return;
+    }
+    FT_BitmapGlyph bitmapcopy = (FT_BitmapGlyph) copy;
+
+    int score = score_glyph_bitmap(bitmapcopy->bitmap);
+    fprintf(stdout, "Translation: (%d %d) px/64; Baseline: (%d %d) px; Size (%d %d) px; Score: %d\n", dx, dy, bitmapcopy->left, bitmapcopy->top, bitmapcopy->bitmap.width, bitmapcopy->bitmap.rows, score);
+    draw_glyph_bitmap(bitmapcopy->bitmap);
+    FT_Done_Glyph(copy);
+    fprintf(stdout, "\n");
 }
 
 int main(int argc, char **argv) {
@@ -40,7 +74,7 @@ int main(int argc, char **argv) {
   int size_in_px = atoi(argv[3]);
 
   FT_Library library;
-  int error;
+  FT_Error error;
 
   error = FT_Init_FreeType(&library);
   if (error) {
@@ -73,19 +107,17 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  draw_glyph(face->glyph, 0, 0);
+
   /* Perform a 2D scan of the surface looking for optimal positioning in
    * 5 * 9 = 45 iterations */
   int step = 16;
   int dx = 0;
   int dy = 0;
   while (step != 0) {
-    int bestscore = 0;
+    int bestscore = -0x7ffffff;
     int besti = 0;
     for (int i = 0; i < 9; i ++) {
-      FT_Glyph copy;
-
-      error = FT_Get_Glyph(face->glyph, &copy);
-
       /* Generate adjustment coordinates:
        *
        * 0 1 2
@@ -97,27 +129,17 @@ int main(int argc, char **argv) {
        */
       int adjx = ((i % 3) - 1) * step;
       int adjy = ((i / 3) - 1) * step;
-
-      FT_Vector position = { dx + adjx, dy + adjy };
-      error = FT_Glyph_To_Bitmap(&copy, FT_RENDER_MODE_NORMAL, &position, 1);
-      if (error) {
-        fprintf(stderr, "FT render glyph: error %d\n", error);
-        return 1;
-      }
-
-      int score = estimate_contrast(((FT_BitmapGlyph) copy)->bitmap);
+      int score = score_glyph(face->glyph, dx + adjx, dy + adjy);
       if (score > bestscore) {
-  	fprintf(stdout, "translated: (%d %d)/64 px, score: %d\n", (int) position.x, (int) position.y, score);
-  	print_glyph(((FT_BitmapGlyph) copy)->bitmap);
         bestscore = score;
         besti = i;
       }
-
-      FT_Done_Glyph(copy);
     }
 
     dx += ((besti % 3) - 1) * step;
     dy += ((besti / 3) - 1) * step;
     step >>= 1;
   }
+
+  draw_glyph(face->glyph, dx, dy);
 }
