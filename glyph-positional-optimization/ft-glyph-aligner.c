@@ -48,7 +48,7 @@ int score_glyph(FT_GlyphSlot glyph, int dx, int dy) {
     return score;
 }*/
 
-int draw_glyph(FT_GlyphSlot glyph, int dx, int dy) {
+/*int draw_glyph(FT_GlyphSlot glyph, int dx, int dy) {
     FT_Glyph copy;
     FT_Error error;
 
@@ -57,7 +57,7 @@ int draw_glyph(FT_GlyphSlot glyph, int dx, int dy) {
     error = FT_Glyph_To_Bitmap(&copy, FT_RENDER_MODE_NORMAL, &position, 1);
     if (error) {
         fprintf(stderr, "FT glyph to bitmap: error %d\n", error);
-        return;
+        return 0;
     }
     FT_BitmapGlyph bitmapcopy = (FT_BitmapGlyph) copy;
 
@@ -68,6 +68,7 @@ int draw_glyph(FT_GlyphSlot glyph, int dx, int dy) {
     fprintf(stdout, "\n");
     return score;
 }
+*/
 
 int main(int argc, char **argv) {
     if (argc != 3) {
@@ -103,6 +104,7 @@ int main(int argc, char **argv) {
     /* Scan for optimal y offset */
     int bestdy = 0;
     int bestscore = -0x7fffffff;
+    int defaultscore = 0;
     for (int dy = -32; dy < 32; dy ++) {
         FT_Vector position = { 0, dy };
         FT_Set_Transform(face, 0, &position);
@@ -113,7 +115,6 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "FT load glyph: error %d\n", error);
                 return 1;
             }
-
 	    error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
 	    if (error) {
                 fprintf(stderr, "FT render glyph: error %d\n", error);
@@ -122,25 +123,15 @@ int main(int argc, char **argv) {
             score += score_glyph_bitmap(face->glyph->bitmap);
         }
 
+	if (dy == 0) {
+	    defaultscore = score;
+	}
+
         if (score > bestscore) {
             bestscore = score;
 	    bestdy = dy;
         }
     }
 
-
-    FT_Set_Transform(face, NULL, NULL);
-    int defaultscore = 0;
-    int adjustedscore = 0;
-    for (int glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
-	error = FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
-	if (error) {
-	    fprintf(stderr, "FT load glyph: error %d\n", error);
-	    return 1;
-	}
-
-	defaultscore += draw_glyph(face->glyph, 0, 0);
-	adjustedscore += draw_glyph(face->glyph, 0, bestdy);
-    }
-    fprintf(stdout, "Total change: %d -> %d\n", defaultscore, adjustedscore); 
+    fprintf(stdout, "Total change: %d -> %d with dy %d\n", defaultscore, bestscore, bestdy);
 }
