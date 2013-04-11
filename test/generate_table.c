@@ -16,6 +16,7 @@ main(int argc, char **argv)
         fprintf(stderr, "%d,", table[i]);
 	if (alpha == 255) {
 	    fprintf(stdout, "\n");
+	    fprintf(stderr, "\n");
 	}
     }
 }
