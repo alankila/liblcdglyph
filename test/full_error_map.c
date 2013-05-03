@@ -48,8 +48,18 @@ main(int argc, char **argv)
 
 	int32_t correct = l2s[(s2l[fg * 0x101] * alpha + s2l[bg * 0x101] * (255 - alpha) + 128) / 255];
 	int32_t approximated = (fg * 0x101 * ac + bg * 0x101 * (255 - ac) + 128) / 255;
+	int32_t broken = (fg * 0x101 * alpha + bg * 0x101 * (255 - alpha) + 128) / 255;
 
-	fprintf(stdout, "%d %d %f\n", fg, bg, (approximated - correct) / 257.0f);
+	int32_t error_approximated = approximated - correct;
+	if (error_approximated < 0) {
+	    error_approximated = -error_approximated;
+	}
+	int32_t error_broken = broken - correct;
+	if (error_broken < 0) {
+	    error_broken = -error_broken;
+	}
+
+	fprintf(stdout, "%d %d %f\n", fg, bg, (error_broken - error_approximated) / 257.0f);
 	if (bg == 255) {
 	    fprintf(stdout, "\n");
 	}
