@@ -2,78 +2,14 @@
 #include <freetype/freetype.h>
 #include <freetype/ftglyph.h>
 #include <stdio.h>
+#include <png.h>
 
-void draw_glyph_bitmap(FT_Bitmap bitmap) {
-    for (int y = 0; y < bitmap.rows; y ++) {
-        for (int x = 0; x < bitmap.width; x ++) {
-            unsigned char c = bitmap.buffer[y * bitmap.pitch + x];
-	    if (c == 0) {
-	        fprintf(stdout, "   ");
-	    } else {
-	        fprintf(stdout, "%02x ", c);
-	    }
-        }
-        fprintf(stdout, "\n");
-    }
-}
-
-/* The higher score the better. Can be negative. Absolute value has no meaning. */
-int score_glyph_bitmap(FT_Bitmap bitmap) {
-    int score = 0;
-    for (int y = 0; y < bitmap.rows; y ++) {
-        for (int x = 0; x < bitmap.width; x ++) {
-            unsigned char c = bitmap.buffer[y * bitmap.pitch + x];
-	    score -= c * (255 - c);
-        }
-    }
-    return score;
-}
-
-/*
-int score_glyph(FT_GlyphSlot glyph, int dx, int dy) {
-    FT_Glyph copy;
-    FT_Error error;
-
-    error = FT_Get_Glyph(glyph, &copy);
-    FT_Vector position = { dx, dy };
-    error = FT_Glyph_To_Bitmap(&copy, FT_RENDER_MODE_NORMAL, &position, 1);
-    if (error) {
-        fprintf(stderr, "FT glyph to bitmap: error %d\n", error);
-        return -0x7ffffff;
-    }
-    FT_BitmapGlyph bitmapcopy = (FT_BitmapGlyph) copy;
-
-    int score = score_glyph_bitmap(bitmapcopy->bitmap);
-    FT_Done_Glyph(copy);
-    return score;
-}*/
-
-/*int draw_glyph(FT_GlyphSlot glyph, int dx, int dy) {
-    FT_Glyph copy;
-    FT_Error error;
-
-    error = FT_Get_Glyph(glyph, &copy);
-    FT_Vector position = { dx, dy };
-    error = FT_Glyph_To_Bitmap(&copy, FT_RENDER_MODE_NORMAL, &position, 1);
-    if (error) {
-        fprintf(stderr, "FT glyph to bitmap: error %d\n", error);
-        return 0;
-    }
-    FT_BitmapGlyph bitmapcopy = (FT_BitmapGlyph) copy;
-
-    int score = score_glyph_bitmap(bitmapcopy->bitmap);
-    fprintf(stdout, "Translation: (%d %d) px/64; Baseline: (%d %d) px; Size (%d %d) px; Score: %d\n", dx, dy, bitmapcopy->left, bitmapcopy->top, bitmapcopy->bitmap.width, bitmapcopy->bitmap.rows, score);
-    draw_glyph_bitmap(bitmapcopy->bitmap);
-    FT_Done_Glyph(copy);
-    fprintf(stdout, "\n");
-    return score;
-}
-*/
+#define WIDTH 800
 
 int main(int argc, char **argv) {
     if (argc != 3) {
-	fprintf(stderr, "Usage: %s font_file size_in_px\n", argv[0]);
-	return 1;
+        fprintf(stderr, "Usage: %s font_file size_in_px\n", argv[0]);
+        return 1;
     }
 
     char *font_name = argv[1];
@@ -84,54 +20,92 @@ int main(int argc, char **argv) {
 
     error = FT_Init_FreeType(&library);
     if (error) {
-	fprintf(stderr, "FT init freetype: error %d\n", error);
-	return 1;
+        fprintf(stderr, "FT init freetype: error %d\n", error);
+        return 1;
     }
 
     FT_Face face;
     error = FT_New_Face(library, font_name, 0, &face);
     if (error) {
-	fprintf(stderr, "FT new face: error %d\n", error);
-	return 1;
+        fprintf(stderr, "FT new face: error %d\n", error);
+        return 1;
     }
 
     error = FT_Set_Pixel_Sizes(face, size_in_px, size_in_px);
     if (error) {
-	fprintf(stderr, "FT set pixel sizes: error %d\n", error);
-	return 1;
+        fprintf(stderr, "FT set pixel sizes: error %d\n", error);
+        return 1;
     }
 
-    /* Scan for optimal y offset */
-    int bestdy = 0;
-    int bestscore = -0x7fffffff;
-    int defaultscore = 0;
-    for (int dy = -32; dy < 32; dy ++) {
-        FT_Vector position = { 0, dy };
-        FT_Set_Transform(face, 0, &position);
-        int score = 0;
-        for (int glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
-	    error = FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
-            if (error) {
-                fprintf(stderr, "FT load glyph: error %d\n", error);
-                return 1;
+    int height = size_in_px * 2;
+
+    const char *text = "The quick brown fox jumps over the lazy fog. äöå $€#! @ 0123456789+-/\\*[](){}";
+    int textlen = strlen(text);
+    uint32_t *picture = calloc(sizeof(int), WIDTH * height);
+
+    int pos = 0;
+    for (int i = 0; i < textlen; i += 1) {
+        char currentchar = text[i];
+        int glyph_index = FT_Get_Char_Index(face, currentchar);
+
+        error = FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
+        if (error) {
+            fprintf(stderr, "FT load glyph: error %d\n", error);
+            return 1;
+        }
+        error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
+        if (error) {
+            fprintf(stderr, "FT render glyph: error %d\n", error);
+            return 1;
+        }
+
+        FT_Bitmap bitmap = face->glyph->bitmap;
+        for (int y = 0; y < bitmap.rows; y ++) {
+            if (y >= height) {
+                break;
             }
-	    error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
-	    if (error) {
-                fprintf(stderr, "FT render glyph: error %d\n", error);
-                return 1;
-	    }
-            score += score_glyph_bitmap(face->glyph->bitmap);
+            for (int x = 0; x < bitmap.width; x ++) {
+                uint8_t c = bitmap.buffer[y * bitmap.pitch + x];
+                int pixel = (pos + x) / 3;
+                int subpixel = (pos + x) % 3;
+                if (pixel >= WIDTH) {
+                    break;
+                }
+         
+                uint32_t mask = 0xfff ^ (0xf00 >> (subpixel * 8));
+                uint32_t v = picture[pixel + WIDTH * y] & mask;
+                v += c;
+                if (v > 255) {
+                    v = 255;
+                }
+                picture[pixel + WIDTH * y] &= 0xfff ^ mask;
+                picture[pixel + WIDTH * y] |= v;
+            }
         }
 
-	if (dy == 0) {
-	    defaultscore = score;
-	}
+        pos += face->glyph->advance.x * 3 >> 6;
+    }
 
-        if (score > bestscore) {
-            bestscore = score;
-	    bestdy = dy;
+    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    png_init_io(png_ptr, stdout);
+    
+    png_set_IHDR(png_ptr, info_ptr, 800, height,
+                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+
+    png_write_info(png_ptr, info_ptr);
+
+    png_bytep *row_pointers = (png_bytep *) malloc(sizeof(png_bytep) * height);
+    for (int y = 0; y < height; y += 1) {
+        row_pointers[y] = (png_byte *) malloc(png_get_rowbytes(png_ptr, info_ptr));
+        for (int x = 0; x < WIDTH; x ++) {
+            row_pointers[y][x * 3 + 0] = (uint8_t) picture[y * WIDTH + x] >> 16;
+            row_pointers[y][x * 3 + 1] = (uint8_t) picture[y * WIDTH + x] >> 8;
+            row_pointers[y][x * 3 + 2] = (uint8_t) picture[y * WIDTH + x] >> 0;
         }
     }
 
-    fprintf(stdout, "Total change: %d -> %d with dy %d\n", defaultscore, bestscore, bestdy);
+    png_write_image(png_ptr, row_pointers);
+    png_write_end(png_ptr, NULL);
 }
