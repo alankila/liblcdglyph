@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        /* Darkening: 1/3th pixel */
+        /* Darkening: 1/3th pixel -- enough for most sizes */
         error = FT_Outline_EmboldenXY(&face->glyph->outline, 22, 22);
         if (error) {
             fprintf(stderr, "FT outline embolden: error %d\n", error);
@@ -115,9 +115,9 @@ int main(int argc, char **argv) {
         pen_x += (face->glyph->advance.x + 32) >> 6;
     }
 
-    /* LCD filter */
+    /* LCD filter. Notice that this filter tends to move the bitmap 1 subpixel to right */
     for (int y = 0; y < height; y += 1) {
-        int comp[3] = {0, 0, 0};
+        int comp[3] = { 0, 0, 0 };
         for (int x = 0; x < WIDTH * 3; x += 1) {
             comp[x % 3] = picture[y * WIDTH * 3 + x];
             picture[y * WIDTH * 3 + x] = (comp[0] + comp[1] + comp[2] + 2) / 3;
@@ -131,6 +131,8 @@ int main(int argc, char **argv) {
     png_set_IHDR(png_ptr, info_ptr, WIDTH, height,
                  8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+
+    png_set_sRGB(png_ptr, info_ptr, PNG_sRGB_INTENT_SATURATION);
 
     png_write_info(png_ptr, info_ptr);
 
