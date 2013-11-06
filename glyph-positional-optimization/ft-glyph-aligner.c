@@ -108,15 +108,15 @@ int main(int argc, char **argv) {
             for (int x = 0; x < bitmap.width; x ++) {
                 uint32_t c = bitmap.buffer[y * bitmap.pitch + x];
  
-                int32_t fir[3] = { 0x55, 0x56, 0x55 };
-                for (int dx = -1; dx <= 1; dx ++) {
+                int32_t fir[5] = { 0x0, 0x55, 0x56, 0x55, 0x0 };
+                for (int dx = -2; dx <= 2; dx ++) {
                     int pos_x = dx + x + pen_x + face->glyph->bitmap_left;
                     if (pos_x < 0 || pos_x >= WIDTH * 3) {
                         continue;
                     }
 
                     uint32_t x = picture[pos_x + WIDTH * 3 * pos_y];
-                    x += (c * fir[dx+1] + 128) >> 8;
+                    x += (c * fir[dx+2] + 128) >> 8;
                     if (x > 255) {
                         x = 255;
                     }
@@ -145,8 +145,8 @@ int main(int argc, char **argv) {
         row_pointers[y] = (png_byte *) malloc(png_get_rowbytes(png_ptr, info_ptr));
         for (int x = 0; x < WIDTH; x += 1) {
             row_pointers[y][x*4+0] = map_bow(picture[y * WIDTH * 3 + x*3+0]);
-            row_pointers[y][x*4+1] = map_wob(picture[y * WIDTH * 3 + x*3+1]);
-            row_pointers[y][x*4+2] = map_wob(picture[y * WIDTH * 3 + x*3+2]);
+            row_pointers[y][x*4+1] = map_bow(picture[y * WIDTH * 3 + x*3+1]);
+            row_pointers[y][x*4+2] = map_bow(picture[y * WIDTH * 3 + x*3+2]);
             row_pointers[y][x*4+3] = 0xff;
         }
     }
