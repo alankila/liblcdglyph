@@ -64,9 +64,9 @@ static int32_t optimize_line_to(const FT_Vector *to, void *data) {
         //fprintf(stderr, "Found a line from (%f, %f) to (%f, %f)\n", state->x / 64.0f, state->y / 64.0f, to->x / 64.0f, to->y / 64.0f);
         FT_Pos cx = (to->x + state->x + 1) >> 1;
         FT_Pos cy = (to->y + state->y + 1) >> 1;
-        int32_t is_horiz = abs(dx) < abs(dy);
-        FT_Pos* list = is_horiz ? state->horiz : state->vert;
-        FT_Pos idx = is_horiz ? cx : cy;
+        int32_t is_vert = abs(dx) < abs(dy);
+        FT_Pos* list = is_vert ? state->vert : state->horiz;
+        FT_Pos idx = is_vert ? cx : cy;
         list[idx & 0x3f] += len;
     }
 
@@ -114,16 +114,18 @@ static void optimize_placement(FT_Face face, FT_Vector *pos) {
         .delta = 0
     };
     for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
+        //glyph_index = FT_Get_Char_Index(face, 'T');
         build_glyph(face, glyph_index);
         FT_Outline_Decompose(&face->glyph->outline, &funcs, &state);
+        //break;
     }
 
     /*for (int32_t i = 0; i < 64; i += 1) {
         fprintf(stderr, "%02d %8d %8d\n", i, state.horiz[i], state.vert[i]);
     }*/
 
-    pos->x = -optimize_middle(state.horiz);
-    pos->y = -optimize_middle(state.vert);
+    pos->x = optimize_middle(state.vert);
+    pos->y = optimize_middle(state.horiz);
 }
 
 int main(int argc, char **argv) {
