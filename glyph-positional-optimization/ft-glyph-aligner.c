@@ -25,6 +25,57 @@ static uint8_t map_wob(uint8_t alpha) {
     return ac_fg255[alpha];
 }
 
+/* The higher score the better. Can be negative. Absolute value has no meaning.
+ * Score is based on minimizing the proportion of antialiased pixels. */
+static int32_t score_glyph_bitmap(FT_Bitmap bitmap) {
+    int32_t score = 0;
+    for (int32_t y = 0; y < bitmap.rows; y ++) {
+        for (int32_t x = 0; x < bitmap.width; x ++) {
+            uint8_t c = bitmap.buffer[y * bitmap.pitch + x];
+            score -= c * (255 - c);
+        }
+    }
+    return score;
+}
+
+static int32_t scan_optimal_y_offset(FT_Face face) {
+    /* Scan for optimal y offset */
+    int32_t bestdy = 0;
+    int32_t bestscore = -0x7fffffff;
+    for (int32_t dy = -32; dy < 32; dy ++) {
+        FT_Vector position = { 0, dy };
+        FT_Set_Transform(face, 0, &position);
+        int32_t score = 0;
+        for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
+            int32_t error = FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
+            if (error) {
+                fprintf(stderr, "FT load glyph: error %d\n", error);
+                return 1;
+            }
+            error = FT_Outline_EmboldenXY(&face->glyph->outline, 21, 21);
+            if (error) {
+                fprintf(stderr, "FT outline embolden: error %d\n", error);
+                return 1;
+            }
+            error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
+            if (error) {
+                fprintf(stderr, "FT render glyph: error %d\n", error);
+                return 1;
+            }
+
+            score += score_glyph_bitmap(face->glyph->bitmap);
+        }
+
+        if (score > bestscore) {
+            bestscore = score;
+            bestdy = dy;
+        }
+    }
+
+    fprintf(stderr, "Discovered optimal offset: %d\n", bestdy);
+    return bestdy;
+}
+
 int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(stderr, "Usage: %s font_file size_in_px\n", argv[0]);
@@ -32,7 +83,7 @@ int main(int argc, char **argv) {
     }
 
     char *font_name = argv[1];
-    int size_in_px = atoi(argv[2]);
+    int32_t size_in_px = atoi(argv[2]);
 
     FT_Library library;
     FT_Error error;
@@ -56,28 +107,33 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int height = size_in_px * 2;
+    int32_t dy = scan_optimal_y_offset(face);
+    /* Adjust y offset for optimal contrast */
+    FT_Vector position = { 0, dy };
+    FT_Set_Transform(face, 0, &position);
+
+    int32_t height = size_in_px * 2;
 
     const char *text = "The quick brown fox jumps over the lazy dog. Ta To iiiillll1111|||||////\\\\\\\\";
-    int textlen = strlen(text);
+    int32_t textlen = strlen(text);
     uint8_t *picture = malloc(3 * WIDTH * height);
-    for (int i = 0; i < 3 * WIDTH * height; i ++) {
+    for (int32_t i = 0; i < 3 * WIDTH * height; i += 1) {
         picture[i] = 0;
     }
 
-    int pen_x = 0;
-    int pen_y = height / 2;
-    int previous = 0;
+    int32_t pen_x = 0;
+    int32_t pen_y = height / 2;
+    int32_t previous = 0;
     for (int i = 0; i < textlen; i += 1) {
-        char currentchar = text[i];
-        int glyph_index = FT_Get_Char_Index(face, currentchar);
+        uint8_t currentchar = text[i];
+        int32_t glyph_index = FT_Get_Char_Index(face, currentchar);
 
         error = FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
         if (error) {
             fprintf(stderr, "FT load glyph: error %d\n", error);
             continue;
         }
-
+        
         /* Darkening: 1/3th pixel -- enough for most sizes */
         error = FT_Outline_EmboldenXY(&face->glyph->outline, 21, 21);
         if (error) {
@@ -99,23 +155,23 @@ int main(int argc, char **argv) {
         previous = glyph_index;
 
         FT_Bitmap bitmap = face->glyph->bitmap;
-        for (int y = 0; y < bitmap.rows; y ++) {
-            int pos_y = y + pen_y - face->glyph->bitmap_top;
+        for (int32_t y = 0; y < bitmap.rows; y ++) {
+            int32_t pos_y = y + pen_y - face->glyph->bitmap_top;
             if (pos_y < 0 || pos_y >= height) {
                 continue;
             }
 
-            for (int x = 0; x < bitmap.width; x ++) {
-                uint32_t c = bitmap.buffer[y * bitmap.pitch + x];
+            for (int32_t x = 0; x < bitmap.width; x ++) {
+                int32_t c = bitmap.buffer[y * bitmap.pitch + x];
  
                 int32_t fir[5] = { 0x0, 0x55, 0x56, 0x55, 0x0 };
-                for (int dx = -2; dx <= 2; dx ++) {
-                    int pos_x = dx + x + pen_x + face->glyph->bitmap_left;
+                for (int32_t dx = -2; dx <= 2; dx ++) {
+                    int32_t pos_x = dx + x + pen_x + face->glyph->bitmap_left;
                     if (pos_x < 0 || pos_x >= WIDTH * 3) {
                         continue;
                     }
 
-                    uint32_t x = picture[pos_x + WIDTH * 3 * pos_y];
+                    int32_t x = picture[pos_x + WIDTH * 3 * pos_y];
                     x += (c * fir[dx+2] + 128) >> 8;
                     if (x > 255) {
                         x = 255;
@@ -141,9 +197,9 @@ int main(int argc, char **argv) {
     png_write_info(png_ptr, info_ptr);
 
     png_bytep *row_pointers = (png_bytep *) malloc(sizeof(png_bytep) * height);
-    for (int y = 0; y < height; y += 1) {
+    for (int32_t y = 0; y < height; y += 1) {
         row_pointers[y] = (png_byte *) malloc(png_get_rowbytes(png_ptr, info_ptr));
-        for (int x = 0; x < WIDTH; x += 1) {
+        for (int32_t x = 0; x < WIDTH; x += 1) {
             row_pointers[y][x*4+0] = map_bow(picture[y * WIDTH * 3 + x*3+0]);
             row_pointers[y][x*4+1] = map_bow(picture[y * WIDTH * 3 + x*3+1]);
             row_pointers[y][x*4+2] = map_bow(picture[y * WIDTH * 3 + x*3+2]);
