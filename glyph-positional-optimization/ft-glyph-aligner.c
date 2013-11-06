@@ -91,37 +91,32 @@ int main(int argc, char **argv) {
 
         FT_Bitmap bitmap = face->glyph->bitmap;
         for (int y = 0; y < bitmap.rows; y ++) {
+            int pos_y = y + pen_y - face->glyph->bitmap_top;
+            if (pos_y < 0 || pos_y >= height) {
+                continue;
+            }
+
             for (int x = 0; x < bitmap.width; x ++) {
                 uint32_t c = bitmap.buffer[y * bitmap.pitch + x];
  
-                int pos_x = x + pen_x + face->glyph->bitmap_left;
-                int pos_y = y + pen_y - face->glyph->bitmap_top;
+                int32_t fir[3] = { 0x55, 0x56, 0x55 };
+                for (int dx = -1; dx <= 1; dx ++) {
+                    int pos_x = dx + x + pen_x + face->glyph->bitmap_left;
+                    if (pos_x < 0 || pos_x >= WIDTH * 3) {
+                        continue;
+                    }
 
-                if (pos_x < 0 || pos_x >= WIDTH * 3) {
-                    continue;
+                    uint32_t x = picture[pos_x + WIDTH * 3 * pos_y];
+                    x += (c * fir[dx+1] + 128) >> 8;
+                    if (x > 255) {
+                        x = 255;
+                    }
+                    picture[pos_x + WIDTH * 3 * pos_y] = x;
                 }
-                if (pos_y < 0 || pos_y >= height) {
-                    continue;
-                }
-                uint32_t x = picture[pos_x + WIDTH * 3 * pos_y];
-                x += c;
-                if (x > 255) {
-                    x = 255;
-                }
-                picture[pos_x + WIDTH * 3 * pos_y] = x;
             }
         }
 
         pen_x += (face->glyph->advance.x + 32) >> 6;
-    }
-
-    /* LCD filter. Notice that this filter tends to move the bitmap 1 subpixel to right */
-    for (int y = 0; y < height; y += 1) {
-        int comp[3] = { 0, 0, 0 };
-        for (int x = 0; x < WIDTH * 3; x += 1) {
-            comp[x % 3] = picture[y * WIDTH * 3 + x];
-            picture[y * WIDTH * 3 + x] = (comp[0] + comp[1] + comp[2] + 2) / 3;
-        }
     }
 
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
