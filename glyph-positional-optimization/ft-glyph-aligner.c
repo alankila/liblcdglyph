@@ -1,6 +1,7 @@
 #include <ft2build.h>
 #include <freetype/freetype.h>
 #include <freetype/ftglyph.h>
+#include <freetype/ftmodapi.h>
 #include <freetype/ftoutln.h>
 #include <math.h>
 #include <png.h>
@@ -8,31 +9,20 @@
 
 #define WIDTH 800
 
-/* black on white */
-static uint8_t ac_fg0[256] = {
-0,0,1,1,2,2,3,3,4,4,5,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,13,14,14,15,15,16,16,17,17,18,18,19,19,20,20,21,21,22,22,23,23,24,24,25,25,26,27,27,28,28,29,29,30,30,31,31,32,32,33,33,34,34,35,36,36,37,37,38,38,39,39,40,41,41,42,42,43,43,44,45,45,46,46,47,47,48,49,49,50,50,51,52,52,53,53,54,55,55,56,57,57,58,58,59,60,60,61,62,62,63,64,64,65,66,66,67,67,68,69,70,70,71,72,72,73,74,74,75,76,76,77,78,79,79,80,81,82,82,83,84,84,85,86,87,88,88,89,90,91,91,92,93,94,95,95,96,97,98,99,100,100,101,102,103,104,105,106,107,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,134,135,136,137,138,140,141,142,143,144,146,147,148,150,151,152,154,155,157,158,160,161,163,164,166,168,169,171,173,175,176,178,180,182,184,186,189,191,193,196,199,201,204,207,210,214,218,222,226,232,238,246,255,
-};
-/* white on black */
-static uint8_t ac_fg255[256] = {
-0,5,9,13,16,19,22,24,27,29,32,34,36,38,40,42,44,46,48,50,52,54,56,57,59,61,62,64,65,67,69,70,72,73,75,76,77,79,80,82,83,84,86,87,88,90,91,92,93,95,96,97,98,100,101,102,103,104,105,107,108,109,110,111,112,113,114,115,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,140,141,142,143,144,145,146,147,148,149,150,150,151,152,153,154,155,156,157,157,158,159,160,161,162,163,163,164,165,166,167,167,168,169,170,171,171,172,173,174,175,175,176,177,178,178,179,180,181,181,182,183,184,184,185,186,187,187,188,189,190,190,191,192,193,193,194,195,195,196,197,198,198,199,200,200,201,202,202,203,204,205,205,206,207,207,208,209,209,210,211,211,212,213,213,214,215,215,216,216,217,218,218,219,220,220,221,222,222,223,224,224,225,225,226,227,227,228,229,229,230,230,231,232,232,233,233,234,235,235,236,236,237,238,238,239,239,240,241,241,242,242,243,244,244,245,245,246,247,247,248,248,249,249,250,251,251,252,252,253,253,254,254,255,
-};
-
-static uint8_t map_bow(uint8_t alpha) {
-    return 255 - ac_fg0[alpha];
-}
-
-static uint8_t map_wob(uint8_t alpha) {
-    return ac_fg255[alpha];
+static uint8_t map(float fg, float bg, uint8_t alpha) {
+    float a = alpha / 255.0f;
+    float mix = fg * a + (1.0f - a) * bg;
+    return roundf(powf(mix, 1.0f/2.2f) * 255.0f);
 }
 
 static void build_glyph(FT_Face face, int32_t glyph_index) {
     FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
-    FT_Outline_EmboldenXY(&face->glyph->outline, 21, 21);
+    FT_Outline_EmboldenXY(&face->glyph->outline, 32, 32);
     FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
 }
 
-/* The higher score the better. Can be negative. Absolute value has no meaning.
- * Score is based on minimizing the proportion of antialiased pixels. */
+/* The higher the score the better. Can be negative. Absolute value has no meaning.
+ * Score is based on minimizing the number of mid-level antialiased pixels. */
 static int32_t score_glyph_bitmap(FT_Bitmap bitmap) {
     int32_t score = 0;
     for (int32_t y = 0; y < bitmap.rows; y ++) {
@@ -102,6 +92,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* Disable stem darkening; we have our own thing with bolding */
+    FT_Bool no_stem_darkening = 1;
+    FT_Property_Set(library, "cff", "no-stem-darkening", &no_stem_darkening);
+
     FT_Face face;
     error = FT_New_Face(library, font_name, 0, &face);
     if (error) {
@@ -118,8 +112,6 @@ int main(int argc, char **argv) {
     int32_t dx = scan_optimal_x_offset(face);
     int32_t dy = scan_optimal_y_offset(face);
     fprintf(stderr, "Translating font face by (%d, %d) 1/64th pixels\n", dx, dy);
-
-    /* Adjust y offset for optimal contrast */
     FT_Vector position = { dx, dy };
     FT_Set_Transform(face, 0, &position);
 
@@ -157,7 +149,7 @@ int main(int argc, char **argv) {
             for (int32_t x = 0; x < bitmap.width; x ++) {
                 int32_t c = bitmap.buffer[y * bitmap.pitch + x];
  
-                int32_t fir[5] = { 0x0, 0x55, 0x56, 0x55, 0x0 };
+                int32_t fir[5] = { 0x0, 0x55, 0x55, 0x55, 0x0 };
                 for (int32_t dx = -2; dx <= 2; dx ++) {
                     int32_t pos_x = dx + x + pen_x + face->glyph->bitmap_left;
                     if (pos_x < 0 || pos_x >= WIDTH * 3) {
@@ -167,6 +159,7 @@ int main(int argc, char **argv) {
                     int32_t x = picture[pos_x + WIDTH * 3 * pos_y];
                     x += (c * fir[dx+2] + 128) >> 8;
                     if (x > 255) {
+                        fprintf(stderr, "overflow at (%d, %d)\n", pos_x, pos_y);
                         x = 255;
                     }
                     picture[pos_x + WIDTH * 3 * pos_y] = x;
@@ -195,18 +188,18 @@ int main(int argc, char **argv) {
         for (int32_t x = 0; x < WIDTH; x += 1) {
             switch (color) {
             case 0:
-                row_pointers[y][x*4+0] = map_bow(picture[y * WIDTH * 3 + x*3+0]);
-                row_pointers[y][x*4+1] = map_bow(picture[y * WIDTH * 3 + x*3+1]);
-                row_pointers[y][x*4+2] = map_bow(picture[y * WIDTH * 3 + x*3+2]);
+                row_pointers[y][x*4+0] = map(0, 1, picture[y * WIDTH * 3 + x*3+0]);
+                row_pointers[y][x*4+1] = map(0, 1, picture[y * WIDTH * 3 + x*3+1]);
+                row_pointers[y][x*4+2] = map(0, 1, picture[y * WIDTH * 3 + x*3+2]);
                 break;
             case 1:
-                row_pointers[y][x*4+0] = map_wob(picture[y * WIDTH * 3 + x*3+0]);
-                row_pointers[y][x*4+1] = map_wob(picture[y * WIDTH * 3 + x*3+1]);
-                row_pointers[y][x*4+2] = map_wob(picture[y * WIDTH * 3 + x*3+2]);
+                row_pointers[y][x*4+0] = map(1, 0, picture[y * WIDTH * 3 + x*3+0]);
+                row_pointers[y][x*4+1] = map(1, 0, picture[y * WIDTH * 3 + x*3+1]);
+                row_pointers[y][x*4+2] = map(1, 0, picture[y * WIDTH * 3 + x*3+2]);
                 break;
             case 2:
-                row_pointers[y][x*4+0] = map_wob(picture[y * WIDTH * 3 + x*3+0]);
-                row_pointers[y][x*4+1] = map_bow(picture[y * WIDTH * 3 + x*3+1]);
+                row_pointers[y][x*4+0] = map(1, 0, picture[y * WIDTH * 3 + x*3+0]);
+                row_pointers[y][x*4+1] = map(0, 1, picture[y * WIDTH * 3 + x*3+1]);
                 row_pointers[y][x*4+2] = 0;
                 break;
             }
