@@ -25,6 +25,12 @@ static uint8_t map_wob(uint8_t alpha) {
     return ac_fg255[alpha];
 }
 
+static void build_glyph(FT_Face face, int32_t glyph_index) {
+    FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
+    FT_Outline_EmboldenXY(&face->glyph->outline, 21, 21);
+    FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
+}
+
 /* The higher score the better. Can be negative. Absolute value has no meaning.
  * Score is based on minimizing the proportion of antialiased pixels. */
 static int32_t score_glyph_bitmap(FT_Bitmap bitmap) {
@@ -38,52 +44,54 @@ static int32_t score_glyph_bitmap(FT_Bitmap bitmap) {
     return score;
 }
 
-static int32_t scan_optimal_y_offset(FT_Face face) {
-    /* Scan for optimal y offset */
-    int32_t bestdy = 0;
+static int32_t scan_optimal_x_offset(FT_Face face) {
+    int32_t best = 0;
     int32_t bestscore = -0x7fffffff;
-    for (int32_t dy = -32; dy < 32; dy ++) {
-        FT_Vector position = { 0, dy };
+    for (int32_t opt = -32; opt < 32; opt ++) {
+        FT_Vector position = { opt, 0 };
         FT_Set_Transform(face, 0, &position);
         int32_t score = 0;
         for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
-            int32_t error = FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
-            if (error) {
-                fprintf(stderr, "FT load glyph: error %d\n", error);
-                return 1;
-            }
-            error = FT_Outline_EmboldenXY(&face->glyph->outline, 21, 21);
-            if (error) {
-                fprintf(stderr, "FT outline embolden: error %d\n", error);
-                return 1;
-            }
-            error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
-            if (error) {
-                fprintf(stderr, "FT render glyph: error %d\n", error);
-                return 1;
-            }
-
+            build_glyph(face, glyph_index);
             score += score_glyph_bitmap(face->glyph->bitmap);
         }
-
         if (score > bestscore) {
             bestscore = score;
-            bestdy = dy;
+            best = opt;
+        }
+    }
+    return best;
+}
+
+static int32_t scan_optimal_y_offset(FT_Face face) {
+    int32_t best = 0;
+    int32_t bestscore = -0x7fffffff;
+    for (int32_t opt = -32; opt < 32; opt ++) {
+        FT_Vector position = { 0, opt };
+        FT_Set_Transform(face, 0, &position);
+        int32_t score = 0;
+        for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
+            build_glyph(face, glyph_index);
+            score += score_glyph_bitmap(face->glyph->bitmap);
+        }
+        if (score > bestscore) {
+            bestscore = score;
+            best = opt;
         }
     }
 
-    fprintf(stderr, "Discovered optimal offset: %d\n", bestdy);
-    return bestdy;
+    return best;
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s font_file size_in_px\n", argv[0]);
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s font_file size_in_px color\n", argv[0]);
         return 1;
     }
 
     char *font_name = argv[1];
     int32_t size_in_px = atoi(argv[2]);
+    int32_t color = atoi(argv[3]);
 
     FT_Library library;
     FT_Error error;
@@ -107,9 +115,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    int32_t dx = scan_optimal_x_offset(face);
     int32_t dy = scan_optimal_y_offset(face);
+    fprintf(stderr, "Translating font face by (%d, %d) 1/64th pixels\n", dx, dy);
+
     /* Adjust y offset for optimal contrast */
-    FT_Vector position = { 0, dy };
+    FT_Vector position = { dx, dy };
     FT_Set_Transform(face, 0, &position);
 
     int32_t height = size_in_px * 2;
@@ -127,25 +138,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < textlen; i += 1) {
         uint8_t currentchar = text[i];
         int32_t glyph_index = FT_Get_Char_Index(face, currentchar);
-
-        error = FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
-        if (error) {
-            fprintf(stderr, "FT load glyph: error %d\n", error);
-            continue;
-        }
-        
-        /* Darkening: 1/3th pixel -- enough for most sizes */
-        error = FT_Outline_EmboldenXY(&face->glyph->outline, 21, 21);
-        if (error) {
-            fprintf(stderr, "FT outline embolden: error %d\n", error);
-            continue;
-        }
-
-        error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
-        if (error) {
-            fprintf(stderr, "FT render glyph: error %d\n", error);
-            continue;
-        }
+        build_glyph(face, glyph_index);
 
         if (previous) {
             FT_Vector delta;
@@ -200,9 +193,23 @@ int main(int argc, char **argv) {
     for (int32_t y = 0; y < height; y += 1) {
         row_pointers[y] = (png_byte *) malloc(png_get_rowbytes(png_ptr, info_ptr));
         for (int32_t x = 0; x < WIDTH; x += 1) {
-            row_pointers[y][x*4+0] = map_bow(picture[y * WIDTH * 3 + x*3+0]);
-            row_pointers[y][x*4+1] = map_bow(picture[y * WIDTH * 3 + x*3+1]);
-            row_pointers[y][x*4+2] = map_bow(picture[y * WIDTH * 3 + x*3+2]);
+            switch (color) {
+            case 0:
+                row_pointers[y][x*4+0] = map_bow(picture[y * WIDTH * 3 + x*3+0]);
+                row_pointers[y][x*4+1] = map_bow(picture[y * WIDTH * 3 + x*3+1]);
+                row_pointers[y][x*4+2] = map_bow(picture[y * WIDTH * 3 + x*3+2]);
+                break;
+            case 1:
+                row_pointers[y][x*4+0] = map_wob(picture[y * WIDTH * 3 + x*3+0]);
+                row_pointers[y][x*4+1] = map_wob(picture[y * WIDTH * 3 + x*3+1]);
+                row_pointers[y][x*4+2] = map_wob(picture[y * WIDTH * 3 + x*3+2]);
+                break;
+            case 2:
+                row_pointers[y][x*4+0] = map_wob(picture[y * WIDTH * 3 + x*3+0]);
+                row_pointers[y][x*4+1] = map_bow(picture[y * WIDTH * 3 + x*3+1]);
+                row_pointers[y][x*4+2] = 0;
+                break;
+            }
             row_pointers[y][x*4+3] = 0xff;
         }
     }
