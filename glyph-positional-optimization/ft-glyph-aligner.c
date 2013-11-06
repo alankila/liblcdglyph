@@ -21,56 +21,109 @@ static void build_glyph(FT_Face face, int32_t glyph_index) {
     FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
 }
 
-/* The higher the score the better. Can be negative. Absolute value has no meaning.
- * Score is based on minimizing the number of mid-level antialiased pixels. */
-static int32_t score_glyph_bitmap(FT_Bitmap bitmap) {
-    int32_t score = 0;
-    for (int32_t y = 0; y < bitmap.rows; y ++) {
-        for (int32_t x = 0; x < bitmap.width; x ++) {
-            uint8_t c = bitmap.buffer[y * bitmap.pitch + x];
-            score -= c * (255 - c);
-        }
-    }
-    return score;
+/* The analysis is only be carried out on (almost) vertical and (almost) horizontal lines.
+ * Curves would be assumed to be too "curvy" and to always antialias, and therefore can be ignored.
+ * The remaining lines denote the relevant edges of solid regions, and such regions are separated
+ * by moveto instructions.
+ *
+ * 1. A line that's almost vertical or horizontal (= less than 0.5 px difference in either x or y
+ *    endpoint coords) would be reduced to its midpoint to estimate location of its edge, and
+ *    its length would be stored to be used as a weighting factor later. Data is
+ *    (direction, 1-dimensional position, length). Line must be at least 1 px long to qualify.
+ * 
+ * 2. Once all vertical and horizontal edges have be collected, then the optimizer would
+ *    split the edges into two separate lists based on direction for the optimal offset analysis.
+ *
+ * 3. The optimal offset will be most easily done by only storing the bottom 6 bits of the line
+ *    midpoint coordinates and then averaging the lines by their weight, and then returning that value
+ *    as the negative offset. This also gives upper limit for the datastructures involved:
+ *
+ * horiz lists: 64 elements of int32 type
+ * vert lists: 64 elements of int32 type
+ */
+typedef struct {
+    FT_Pos horiz[64];
+    FT_Pos vert[64];
+    FT_Pos x, y;
+} optimize_state_t;
+
+static int32_t optimize_move_to(const FT_Vector *to, void *data) {
+    optimize_state_t *state = data;
+    state->x = to->x;
+    state->y = to->y;
+    return 0;
 }
 
-static int32_t scan_optimal_x_offset(FT_Face face) {
-    int32_t best = 0;
-    int32_t bestscore = -0x7fffffff;
-    for (int32_t opt = -32; opt < 32; opt ++) {
-        FT_Vector position = { opt, 0 };
-        FT_Set_Transform(face, 0, &position);
-        int32_t score = 0;
-        for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
-            build_glyph(face, glyph_index);
-            score += score_glyph_bitmap(face->glyph->bitmap);
-        }
-        if (score > bestscore) {
-            bestscore = score;
-            best = opt;
-        }
+static int32_t optimize_line_to(const FT_Vector *to, void *data) {
+    optimize_state_t *state = data;
+    FT_Pos dx = to->x - state->x;
+    FT_Pos dy = to->y - state->y;
+    FT_Pos len = 0.5f + sqrtf(dx * dx + dy * dy);
+
+    if ((abs(dx) <= 32 || abs(dy) <= 32) && len >= 64) {
+        //fprintf(stderr, "Found a line from (%ld, %ld) to (%ld, %ld)\n", state->x, state->y, to->x, to->y);
+        FT_Pos cx = (to->x + state->x + 1) >> 1;
+        FT_Pos cy = (to->y + state->y + 1) >> 1;
+        int32_t is_horiz = abs(dx) < abs(dy);
+        FT_Pos* list = is_horiz ? state->horiz : state->vert;
+        FT_Pos idx = is_horiz ? cx : cy;
+        list[idx & 0x3f] += len;
     }
-    return best;
+
+    state->x = to->x;
+    state->y = to->y;
+    return 0;
 }
 
-static int32_t scan_optimal_y_offset(FT_Face face) {
-    int32_t best = 0;
-    int32_t bestscore = -0x7fffffff;
-    for (int32_t opt = -32; opt < 32; opt ++) {
-        FT_Vector position = { 0, opt };
-        FT_Set_Transform(face, 0, &position);
-        int32_t score = 0;
-        for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
-            build_glyph(face, glyph_index);
-            score += score_glyph_bitmap(face->glyph->bitmap);
-        }
-        if (score > bestscore) {
-            bestscore = score;
-            best = opt;
-        }
+static int32_t optimize_conic_to(const FT_Vector *ctrl, const FT_Vector *to, void *data) {
+    optimize_state_t *state = data;
+    state->x = to->x;
+    state->y = to->y;
+    return 0;
+}
+
+static int32_t optimize_cubic_to(const FT_Vector *ctrl1, const FT_Vector *ctrl2, const FT_Vector *to, void *data) {
+    optimize_state_t *state = data;
+    state->x = to->x;
+    state->y = to->y;
+    return 0;
+}
+
+static FT_Pos optimize_middle(FT_Pos *list) {
+    FT_Pos sum = 0;
+    FT_Pos count = 0;
+    for (int32_t i = 0; i < 64; i += 1) {
+        sum += i * list[i];
+        count += list[i];
+    }
+    FT_Pos value = count != 0 ? sum / count : 0;
+    if (value > 32) {
+        value -= 64;
+    }
+    return value;
+}
+
+static void optimize_placement(FT_Face face, FT_Vector *pos) {
+    optimize_state_t state = {};
+    FT_Outline_Funcs funcs = {
+        .move_to = optimize_move_to,
+        .line_to = optimize_line_to,
+        .conic_to = optimize_conic_to,
+        .cubic_to = optimize_cubic_to,
+        .shift = 0,
+        .delta = 0
+    };
+    for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
+        build_glyph(face, glyph_index);
+        FT_Outline_Decompose(&face->glyph->outline, &funcs, &state);
     }
 
-    return best;
+    for (int32_t i = 0; i < 64; i += 1) {
+        fprintf(stderr, "%02d %8d %8d\n", i, state.horiz[i], state.vert[i]);
+    }
+
+    pos->x = -optimize_middle(state.horiz);
+    pos->y = -optimize_middle(state.vert);
 }
 
 int main(int argc, char **argv) {
@@ -109,10 +162,18 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int32_t dx = scan_optimal_x_offset(face);
-    int32_t dy = scan_optimal_y_offset(face);
-    fprintf(stderr, "Translating font face by (%d, %d) 1/64th pixels\n", dx, dy);
-    FT_Vector position = { dx, dy };
+    /* FIXME:
+     *
+     * we could also add a pass that attempts to scale the glyph by
+     * 0.5 px and then retry the alignment, and use scaled variant if the
+     * score is better.
+     *
+     * The offsets are not strictly speaking separable, but a full
+     * 64x64 scan is very slow and almost always gives the same numbers.
+     */
+    FT_Vector position;
+    optimize_placement(face, &position);
+    fprintf(stderr, "Translating font face by (%ld, %ld) 1/64th pixels\n", position.x, position.y);
     FT_Set_Transform(face, 0, &position);
 
     int32_t height = size_in_px * 2;
