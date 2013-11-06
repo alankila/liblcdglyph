@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
         }
 
         /* Darkening: 1/3th pixel -- enough for most sizes */
-        error = FT_Outline_EmboldenXY(&face->glyph->outline, 22, 22);
+        error = FT_Outline_EmboldenXY(&face->glyph->outline, 21, 21);
         if (error) {
             fprintf(stderr, "FT outline embolden: error %d\n", error);
             continue;
