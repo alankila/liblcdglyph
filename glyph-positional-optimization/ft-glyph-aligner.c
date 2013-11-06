@@ -61,7 +61,7 @@ static int32_t optimize_line_to(const FT_Vector *to, void *data) {
     FT_Pos len = 0.5f + sqrtf(dx * dx + dy * dy);
 
     if ((abs(dx) <= 32 || abs(dy) <= 32) && len >= 64) {
-        //fprintf(stderr, "Found a line from (%ld, %ld) to (%ld, %ld)\n", state->x, state->y, to->x, to->y);
+        //fprintf(stderr, "Found a line from (%f, %f) to (%f, %f)\n", state->x / 64.0f, state->y / 64.0f, to->x / 64.0f, to->y / 64.0f);
         FT_Pos cx = (to->x + state->x + 1) >> 1;
         FT_Pos cy = (to->y + state->y + 1) >> 1;
         int32_t is_horiz = abs(dx) < abs(dy);
@@ -97,7 +97,7 @@ static FT_Pos optimize_middle(FT_Pos *list) {
         count += list[i];
     }
     FT_Pos value = count != 0 ? sum / count : 0;
-    if (value > 32) {
+    if (value > 31) {
         value -= 64;
     }
     return value;
@@ -118,9 +118,9 @@ static void optimize_placement(FT_Face face, FT_Vector *pos) {
         FT_Outline_Decompose(&face->glyph->outline, &funcs, &state);
     }
 
-    for (int32_t i = 0; i < 64; i += 1) {
+    /*for (int32_t i = 0; i < 64; i += 1) {
         fprintf(stderr, "%02d %8d %8d\n", i, state.horiz[i], state.vert[i]);
-    }
+    }*/
 
     pos->x = -optimize_middle(state.horiz);
     pos->y = -optimize_middle(state.vert);
