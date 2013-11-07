@@ -95,6 +95,7 @@ static FT_Pos optimize_middle(FT_Pos *list) {
         int32_t sum = 0;
         for (int32_t i = 0; i < 64; i += 1) {
             int32_t dist = edge - i;
+            /* Pixel grid wrap: maximum distance is -32 to 31 */
             if (dist < -32) {
                 dist += 64;
             }
@@ -102,9 +103,11 @@ static FT_Pos optimize_middle(FT_Pos *list) {
                 dist -= 64;
             }
 
+            /* Penalizes distance of stems relative to the current 'edge' coordinate */
             sum += dist * dist * list[i];
         }
 
+        /* Smallest sum gets the best expected edge distribution */
         if (sum < bestsum) {
             bestsum = sum;
             bestedge = edge;
