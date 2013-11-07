@@ -18,7 +18,6 @@ static uint8_t map(float fg, float bg, uint8_t alpha) {
 static void build_glyph(FT_Face face, int32_t glyph_index) {
     FT_Load_Glyph(face, glyph_index, FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
     FT_Outline_EmboldenXY(&face->glyph->outline, 32, 32);
-    FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
 }
 
 /* The analysis is only be carried out on (almost) vertical and (almost) horizontal lines.
@@ -31,15 +30,15 @@ static void build_glyph(FT_Face face, int32_t glyph_index) {
  *    its length would be stored to be used as a weighting factor later. Data is
  *    (direction, 1-dimensional position, length). Line must be at least 1 px long to qualify.
  * 
- * 2. Once all vertical and horizontal edges have be collected, then the optimizer would
- *    split the edges into two separate lists based on direction for the optimal offset analysis.
+ * 2. Once all vertical and horizontal edges have be collected, then the optimizer
+ *    splits the edges into two separate lists based on direction for the optimal offset analysis.
  *
  * 3. The optimal offset will be most easily done by only storing the bottom 6 bits of the line
  *    midpoint coordinates and then averaging the lines by their weight, and then returning that value
  *    as the negative offset. This also gives upper limit for the datastructures involved:
  *
- * horiz lists: 64 elements of int32 type
- * vert lists: 64 elements of int32 type
+ * horiz lists: 64 elements
+ * vert lists: 64 elements
  */
 typedef struct {
     FT_Pos horiz[64];
@@ -90,17 +89,29 @@ static int32_t optimize_cubic_to(const FT_Vector *ctrl1, const FT_Vector *ctrl2,
 }
 
 static FT_Pos optimize_middle(FT_Pos *list) {
-    FT_Pos sum = 0;
-    FT_Pos count = 0;
-    for (int32_t i = 0; i < 64; i += 1) {
-        sum += i * list[i];
-        count += list[i];
+    FT_Pos bestedge = 0;
+    FT_Pos bestsum = 0x7fffffff;
+    for (int32_t edge = 0; edge < 64; edge += 1) {
+        int32_t sum = 0;
+        for (int32_t i = 0; i < 64; i += 1) {
+            int32_t dist = edge - i;
+            if (dist < -32) {
+                dist += 64;
+            }
+            if (dist >= 32) {
+                dist -= 64;
+            }
+
+            sum += dist * dist * list[i];
+        }
+
+        if (sum < bestsum) {
+            bestsum = sum;
+            bestedge = edge;
+        }
     }
-    FT_Pos value = count != 0 ? sum / count : 0;
-    if (value > 31) {
-        value -= 64;
-    }
-    return value;
+
+    return bestedge;
 }
 
 static void optimize_placement(FT_Face face, FT_Vector *pos) {
@@ -114,15 +125,25 @@ static void optimize_placement(FT_Face face, FT_Vector *pos) {
         .delta = 0
     };
     for (int32_t glyph_index = 1; glyph_index < face->num_glyphs; glyph_index ++) {
-        //glyph_index = FT_Get_Char_Index(face, 'T');
         build_glyph(face, glyph_index);
         FT_Outline_Decompose(&face->glyph->outline, &funcs, &state);
-        //break;
     }
 
-    /*for (int32_t i = 0; i < 64; i += 1) {
-        fprintf(stderr, "%02d %8d %8d\n", i, state.horiz[i], state.vert[i]);
-    }*/
+    pos->x = optimize_middle(state.vert);
+    pos->y = optimize_middle(state.horiz);
+}
+
+static void optimize_placement_single(FT_Outline *outline, FT_Vector *pos) {
+    optimize_state_t state = {};
+    FT_Outline_Funcs funcs = {
+        .move_to = optimize_move_to,
+        .line_to = optimize_line_to,
+        .conic_to = optimize_conic_to,
+        .cubic_to = optimize_cubic_to,
+        .shift = 0,
+        .delta = 0
+    };
+    FT_Outline_Decompose(outline, &funcs, &state);
 
     pos->x = optimize_middle(state.vert);
     pos->y = optimize_middle(state.horiz);
@@ -176,11 +197,10 @@ int main(int argc, char **argv) {
     FT_Vector position;
     optimize_placement(face, &position);
     fprintf(stderr, "Translating font face by (%ld, %ld) 1/64th pixels\n", position.x, position.y);
-    FT_Set_Transform(face, 0, &position);
 
     int32_t height = size_in_px * 2;
 
-    const char *text = "The quick brown fox jumps over the lazy dog. Ta To iiiillll1111|||||////\\\\\\\\";
+    const char *text = "+ The quick brown fox jumps over the lazy dog. Ta To iiiillll1111|||||////\\\\\\\\";
     int32_t textlen = strlen(text);
     uint8_t *picture = malloc(3 * WIDTH * height);
     for (int32_t i = 0; i < 3 * WIDTH * height; i += 1) {
@@ -192,7 +212,24 @@ int main(int argc, char **argv) {
     int32_t previous = 0;
     for (int i = 0; i < textlen; i += 1) {
         uint8_t currentchar = text[i];
+
+        /*
+        FT_Vector pos2 = {};
+        FT_Set_Transform(face, 0, &pos2);
+        int32_t glyph_index = FT_Get_Char_Index(face, text[0]);
+        build_glyph(face, glyph_index);
+        optimize_placement_single(&face->glyph->outline, &pos2);
+        FT_Set_Transform(face, 0, &pos2);
+        */
+
         int32_t glyph_index = FT_Get_Char_Index(face, currentchar);
+
+        FT_Vector pos2 = {};
+        FT_Set_Transform(face, 0, &pos2);
+        build_glyph(face, glyph_index);
+        optimize_placement_single(&face->glyph->outline, &pos2);
+        pos2.y = position.y;
+        FT_Set_Transform(face, 0, &pos2);
         build_glyph(face, glyph_index);
 
         if (previous) {
@@ -202,6 +239,7 @@ int main(int argc, char **argv) {
         }
         previous = glyph_index;
 
+        FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
         FT_Bitmap bitmap = face->glyph->bitmap;
         for (int32_t y = 0; y < bitmap.rows; y ++) {
             int32_t pos_y = y + pen_y - face->glyph->bitmap_top;
@@ -222,7 +260,7 @@ int main(int argc, char **argv) {
                     int32_t x = picture[pos_x + WIDTH * 3 * pos_y];
                     x += (c * fir[dx+2] + 128) >> 8;
                     if (x > 255) {
-                        fprintf(stderr, "overflow at (%d, %d)\n", pos_x, pos_y);
+                        //fprintf(stderr, "overflow at (%d, %d)\n", pos_x, pos_y);
                         x = 255;
                     }
                     picture[pos_x + WIDTH * 3 * pos_y] = x;
